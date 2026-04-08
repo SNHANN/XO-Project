@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: tic-tac-toe-server
+    runtime: node
+    buildCommand: cd server && npm install
+    startCommand: cd server && npm start
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_URL
+        value: https://your-vercel-app.vercel.app
