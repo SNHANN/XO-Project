@@ -12,7 +12,7 @@ const path = require('path');
 // ===========================================
 const CONFIG = {
   // Your Vercel app URL (frontend)
-  VERCEL_URL: 'https://xo-project.vercel.app',
+  VERCEL_URL: 'xo-project-eosin.vercel.app',
 
   // Your Render server URL (backend) - without port if using standard HTTPS
   RENDER_URL: 'https://xo-project.onrender.com',
