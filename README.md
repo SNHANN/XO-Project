@@ -64,6 +64,9 @@ XO-Project/
 │
 ├── render.yaml            # Render deployment config
 ├── vercel.json           # Vercel deployment config
+├── config.js             # Centralized configuration manager
+├── .env.example           # Environment variables template
+├── .gitignore            # Git ignore rules
 └── README.md
 ```
 
@@ -123,6 +126,54 @@ cd server
 npm run dev
 ```
 
+### Environment Variables for Local Development
+
+Create `.env` files for local development:
+
+**`server/.env`:**
+```
+PORT=3001
+NODE_ENV=development
+CLIENT_URL=http://localhost:3000
+```
+
+**`client/.env.local`:**
+```
+NEXT_PUBLIC_SERVER_URL=http://localhost:3001
+```
+
+## Configuration
+
+### Easy Configuration with `config.js`
+
+Instead of manually editing multiple files, use the centralized configuration:
+
+1. **Open `config.js`** in the root directory
+2. **Edit the CONFIG section** with your URLs:
+   ```javascript
+   const CONFIG = {
+     VERCEL_URL: 'https://your-app.vercel.app',
+     RENDER_URL: 'https://your-server.onrender.com',
+     PORT: 3001,
+   };
+   ```
+3. **Run the configurator**:
+   ```bash
+   node config.js
+   ```
+
+This automatically updates `render.yaml`, `client/next.config.js`, and `.env` files.
+
+### Manual Configuration
+
+If you prefer manual configuration, edit these files:
+
+| File | Variable | Description |
+|------|----------|-------------|
+| `render.yaml` | `CLIENT_URL` | Your Vercel app URL |
+| `client/next.config.js` | `NEXT_PUBLIC_SERVER_URL` | Your Render server URL |
+| `server/.env` | `CLIENT_URL` | Your Vercel app URL |
+
 ## Deployment
 
 ### Deploy Server to Render
@@ -133,10 +184,12 @@ npm run dev
 4. Configure:
    - **Build Command**: `cd server && npm install`
    - **Start Command**: `cd server && npm start`
-   - **Environment Variables**:
+   - **Environment Variables** (or use `render.yaml`):
      - `PORT`: 3001
      - `NODE_ENV`: production
-     - `CLIENT_URL`: Your Vercel app URL
+     - `CLIENT_URL`: Your Vercel app URL (e.g., `https://your-app.vercel.app`)
+
+> **Note**: If you used `config.js`, the `render.yaml` already has the correct values.
 
 ### Deploy Client to Vercel
 
@@ -146,8 +199,12 @@ npm run dev
    - **Framework**: Next.js
    - **Root Directory**: `client`
    - **Build Command**: `npm run build`
+   - **Install Command**: `npm install`
+   - **Output Directory**: `dist`
    - **Environment Variables**:
-     - `NEXT_PUBLIC_SERVER_URL`: Your Render server URL
+     - `NEXT_PUBLIC_SERVER_URL`: Your Render server URL (e.g., `https://your-server.onrender.com`)
+
+> **Important**: After deploying the server, copy its URL and update `NEXT_PUBLIC_SERVER_URL` in Vercel environment variables.
 
 ## How to Play
 
