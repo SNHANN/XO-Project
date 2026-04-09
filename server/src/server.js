@@ -30,14 +30,45 @@ io.on('connection', (socket) => {
   // Handle player joining
   socket.on('join-game', ({ playerName, roomId }) => {
     const result = gameManager.addPlayer(socket.id, playerName, roomId);
-    
+
     if (result.success) {
+      // Handle waiting state (no room yet, waiting for opponent)
+      if (!result.roomId) {
+        socket.emit('waiting', { message: result.message || 'Waiting for opponent...' });
+        return;
+      }
+
+      // Check if there's another player in this game (matchmaking scenario)
+      const otherPlayer = result.gameState.players.find(p => p.id !== socket.id);
+
+      // If there's another player, make sure they're in the room and notified
+      if (otherPlayer) {
+        const otherSocket = io.sockets.sockets.get(otherPlayer.id);
+        if (otherSocket) {
+          otherSocket.join(result.roomId);
+          otherSocket.playerId = otherPlayer.id;
+          otherSocket.roomId = result.roomId;
+          otherSocket.playerSymbol = otherPlayer.symbol;
+
+          // Notify the other player they've joined
+          otherSocket.emit('joined-game', {
+            roomId: result.roomId,
+            symbol: otherPlayer.symbol,
+            board: result.gameState.board,
+            currentPlayer: result.gameState.currentPlayer,
+            players: result.gameState.players,
+            status: result.gameState.status
+          });
+        }
+      }
+
+      // Add current player to room
       socket.join(result.roomId);
       socket.playerId = socket.id;
       socket.roomId = result.roomId;
       socket.playerSymbol = result.symbol;
 
-      // Notify player of successful join
+      // Notify current player
       socket.emit('joined-game', {
         roomId: result.roomId,
         symbol: result.symbol,
@@ -45,13 +76,6 @@ io.on('connection', (socket) => {
         currentPlayer: result.gameState.currentPlayer,
         players: result.gameState.players,
         status: result.gameState.status
-      });
-
-      // Notify other player in room
-      socket.to(result.roomId).emit('player-joined', {
-        playerName,
-        symbol: result.symbol,
-        players: result.gameState.players
       });
 
       // If game is ready (2 players), notify both
