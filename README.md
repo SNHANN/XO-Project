@@ -1,261 +1,269 @@
-# Online Multiplayer Tic-Tac-Toe Game
+# XO Arena — Online Multiplayer Tic-Tac-Toe
 
-A real-time distributed system that allows two players to play Tic-Tac-Toe over the internet using a client-server architecture.
+A production-grade real-time multiplayer Tic-Tac-Toe game implementing distributed systems concepts from **Lectures 1–9**. Features a dark glassmorphism UI, hybrid P2P architecture via WebRTC, a RESTful leaderboard API, secure token-based authentication, AI bot fallback, and a live pub-sub chat system.
+
+---
+
+## Distributed Systems Concepts Implemented
+
+| Lecture | Concept | Implementation |
+|---------|---------|----------------|
+| L1–L5 | **IPC via WebSockets** | Socket.io over TCP with JSON marshalling for all game events |
+| L6 | **Group Communication / Pub-Sub** | Socket.io Rooms — chat and game events broadcast to room subscribers |
+| L7 | **Web Services / REST API** | `GET /api/leaderboard` returns JSON; consumed by the Leaderboard component |
+| L8 | **Hybrid P2P Architecture** | Server as centralized tracker (Napster-style); WebRTC DataChannel for direct move relay |
+| L9 | **Security Mitigations** | SHA-256 token per session (masquerading); `express-rate-limit` on `/api/` (DoS) |
+
+---
 
 ## Features
 
-- **Real-time Multiplayer**: Play against opponents anywhere in real-time
-- **Matchmaking**: Automatic matchmaking or create/join custom game rooms
-- **Chat System**: Built-in chat to communicate with your opponent
-- **Responsive Design**: Works on desktop and mobile devices
-- **Game Rooms**: Support for multiple concurrent games
+- **Real-time Multiplayer** — Socket.io WebSocket connections with sub-100 ms round-trips
+- **Quick Match & Private Rooms** — automatic matchmaking queue or 6-char room codes
+- **Waiting Lounge** — animated overlay with room code copy and AI bot option
+- **AI Bot Fallback** — strategic AI (win → block → center → corner) that responds after every move
+- **Hybrid P2P Moves** — optional WebRTC DataChannel for direct peer-to-peer move delivery; Socket.io fallback
+- **Live Chat** — pub-sub chat with styled bubbles, timestamps, and auto-scroll
+- **RESTful Leaderboard** — polled every 30 s from `/api/leaderboard`
+- **Graceful Disconnect** — modal notification when opponent leaves or disconnects
+- **Secure Token Lifecycle** — token generated on join, stored in `useRef`, attached to every sensitive emission
+- **Dark Glassmorphism UI** — deep `#07071a` background, neon X/O symbols, frosted-glass cards, smooth animations
+
+---
 
 ## Architecture
 
-### System Components
-
 ```
-┌──────────────┐         WebSocket          ┌──────────────┐
-│   Client 1   │  ◄──────────────────────►  │              │
-│  (Next.js)   │                            │   Game       │
-└──────────────┘                            │   Server     │
-                                            │  (Node.js)   │
-┌──────────────┐         WebSocket          │   Socket.io  │
-│   Client 2   │  ◄──────────────────────►  │              │
-│  (Next.js)   │                            └──────────────┘
-└──────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      XO ARENA SYSTEM                        │
+│                                                             │
+│  ┌──────────────┐   Socket.io    ┌──────────────────────┐   │
+│  │  Client A    │◄──────────────►│                      │   │
+│  │  (Next.js)   │   WebSocket    │   Game Server        │   │
+│  │              │                │   Node.js/Express    │   │
+│  │  WebRTC ◄────┼────────────────┼──── Signaling ───────┤   │
+│  └──────┬───────┘                │   Socket.io Rooms    │   │
+│         │ RTCDataChannel         │   Rate Limiter       │   │
+│         │ (direct P2P)           │   Auth Tokens        │   │
+│  ┌──────▼───────┐   Socket.io    │   GameManager        │   │
+│  │  Client B    │◄──────────────►│   AI Bot Engine      │   │
+│  │  (Next.js)   │   WebSocket    │   REST /api/         │   │
+│  └──────────────┘                └──────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Technology Stack
+**Two-tier architecture**: Next.js client (tier 1) ↔ Node.js/Express server (tier 2).  
+Server acts as both the Socket.io relay and WebRTC signaling server (centralized tracker).  
+Once the P2P handshake completes, game moves flow directly between peers via `RTCDataChannel`.
 
-- **Frontend**: Next.js 14, React, TypeScript, TailwindCSS, Lucide Icons
-- **Backend**: Node.js, Express, Socket.io
-- **Communication**: WebSockets (Socket.io) over TCP
-- **Deployment**: Render (server), Vercel (client)
+---
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | Next.js 14, React 18, TypeScript |
+| **Styling** | TailwindCSS 3, custom glassmorphism CSS |
+| **Icons** | Lucide React |
+| **Backend** | Node.js, Express |
+| **Real-time IPC** | Socket.io 4 (WebSocket over TCP) |
+| **P2P** | WebRTC `RTCDataChannel` |
+| **Security** | `crypto` SHA-256 tokens, `express-rate-limit` |
+
+---
 
 ## Project Structure
 
 ```
 XO-Project/
-├── client/                 # Next.js frontend
-│   ├── app/               # App router
-│   │   ├── globals.css    # Global styles
-│   │   ├── layout.tsx     # Root layout
-│   │   └── page.tsx       # Main game page
-│   ├── components/        # React components
-│   │   ├── JoinForm.tsx
-│   │   ├── GameBoard.tsx
-│   │   ├── PlayerInfo.tsx
-│   │   ├── StatusBar.tsx
-│   │   └── ChatBox.tsx
+├── client/                       # Next.js 14 frontend
+│   ├── app/
+│   │   ├── globals.css           # Dark glassmorphism theme + animations
+│   │   ├── layout.tsx            # Root layout
+│   │   └── page.tsx              # Main orchestrator — socket logic, state, P2P
+│   ├── components/
+│   │   ├── JoinForm.tsx          # Quick Match / Private Room form
+│   │   ├── WaitingLounge.tsx     # Animated waiting overlay with AI button
+│   │   ├── GameBoard.tsx         # 3×3 board with neon marks and win animations
+│   │   ├── ChatBox.tsx           # Pub-sub chat with message bubbles
+│   │   └── Leaderboard.tsx       # REST API consumer, auto-refreshes every 30 s
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── next.config.js
 │   ├── tailwind.config.js
 │   └── postcss.config.js
 │
-├── server/                 # Node.js backend
+├── server/
 │   ├── src/
-│   │   ├── server.js      # Main server file
+│   │   ├── server.js             # Express + Socket.io + WebRTC signaling + AI bot
 │   │   └── utils/
-│   │       └── GameManager.js  # Game logic
+│   │       └── GameManager.js    # Game state, matchmaking, move validation
 │   ├── package.json
 │   └── .env.example
 │
-├── render.yaml            # Render deployment config
-├── vercel.json           # Vercel deployment config
-├── config.js             # Centralized configuration manager
-├── .env.example           # Environment variables template
-├── .gitignore            # Git ignore rules
+├── config.js                     # Centralized URL configuration helper
+├── render.yaml                   # Render deployment config
+├── .env.example
+├── .gitignore
 └── README.md
 ```
+
+---
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ installed
-- npm or yarn package manager
+- Node.js 18+
+- npm
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd XO-Project
-   ```
-
-2. **Install server dependencies**
-   ```bash
-   cd server
-   npm install
-   ```
-
-3. **Install client dependencies**
-   ```bash
-   cd ../client
-   npm install
-   ```
-
-### Running Locally
-
-1. **Start the server**
-   ```bash
-   cd server
-   npm run dev
-   ```
-   Server will run on http://localhost:3001
-
-2. **Start the client** (in a new terminal)
-   ```bash
-   cd client
-   npm run dev
-   ```
-   Client will run on http://localhost:3000
-
-3. **Open the app**
-   - Navigate to http://localhost:3000
-   - Enter your name and click "Play Now"
-   - Or enter a Room ID to join a specific game
-
-### Development Mode
-
-The server supports hot reloading with nodemon:
 ```bash
-cd server
-npm run dev
+# 1. Clone
+git clone <repository-url>
+cd XO-Project
+
+# 2. Server dependencies
+cd server && npm install
+
+# 3. Client dependencies
+cd ../client && npm install
 ```
 
-### Environment Variables for Local Development
+### Environment Variables
 
-Create `.env` files for local development:
-
-**`server/.env`:**
+**`server/.env`**
 ```
 PORT=3001
 NODE_ENV=development
 CLIENT_URL=http://localhost:3000
+SECRET_KEY=your-secret-key-here
 ```
 
-**`client/.env.local`:**
+**`client/.env.local`**
 ```
 NEXT_PUBLIC_SERVER_URL=http://localhost:3001
 ```
 
-## Configuration
+### Run Locally
 
-### Easy Configuration with `config.js`
+```bash
+# Terminal 1 — server (port 3001)
+cd server
+npm run dev
 
-Instead of manually editing multiple files, use the centralized configuration:
+# Terminal 2 — client (port 3000)
+cd client
+npm run dev
+```
 
-1. **Open `config.js`** in the root directory
-2. **Edit the CONFIG section** with your URLs:
-   ```javascript
-   const CONFIG = {
-     VERCEL_URL: 'https://your-app.vercel.app',
-     RENDER_URL: 'https://your-server.onrender.com',
-     PORT: 3001,
-   };
-   ```
-3. **Run the configurator**:
-   ```bash
-   node config.js
-   ```
+Open **http://localhost:3000** in two browser tabs to test multiplayer.
 
-This automatically updates `render.yaml`, `client/next.config.js`, and `.env` files.
-
-### Manual Configuration
-
-If you prefer manual configuration, edit these files:
-
-| File | Variable | Description |
-|------|----------|-------------|
-| `render.yaml` | `CLIENT_URL` | Your Vercel app URL |
-| `client/next.config.js` | `NEXT_PUBLIC_SERVER_URL` | Your Render server URL |
-| `server/.env` | `CLIENT_URL` | Your Vercel app URL |
-
-## Deployment
-
-### Deploy Server to Render
-
-1. Create an account on [Render](https://render.com)
-2. Create a new Web Service
-3. Connect your GitHub repository
-4. Configure:
-   - **Build Command**: `cd server && npm install`
-   - **Start Command**: `cd server && npm start`
-   - **Environment Variables** (or use `render.yaml`):
-     - `PORT`: 3001
-     - `NODE_ENV`: production
-     - `CLIENT_URL`: Your Vercel app URL (e.g., `https://your-app.vercel.app`)
-
-> **Note**: If you used `config.js`, the `render.yaml` already has the correct values.
-
-### Deploy Client to Vercel
-
-1. Create an account on [Vercel](https://vercel.com)
-2. Import your GitHub repository
-3. Configure:
-   - **Framework**: Next.js
-   - **Root Directory**: `client`
-   - **Build Command**: `npm run build`
-   - **Install Command**: `npm install`
-   - **Output Directory**: `dist`
-   - **Environment Variables**:
-     - `NEXT_PUBLIC_SERVER_URL`: Your Render server URL (e.g., `https://your-server.onrender.com`)
-
-> **Important**: After deploying the server, copy its URL and update `NEXT_PUBLIC_SERVER_URL` in Vercel environment variables.
+---
 
 ## How to Play
 
-1. **Joining a Game**
-   - Enter your player name
-   - Leave Room ID empty for automatic matchmaking
-   - Or enter a Room ID to create/join a specific room
+1. **Quick Match** — enter your name, click *Find a Match*; server queues you automatically
+2. **Private Room** — switch to *Private Room* tab, leave Room ID blank to create, or enter a code to join
+3. **Waiting Lounge** — copy the room code and share it, or click **Play Against AI Bot** to start instantly
+4. **Gameplay** — X goes first; click any empty cell on your turn
+5. **P2P Mode** — enable the toggle in-game; click *Establish P2P* to route moves via WebRTC DataChannel
+6. **Chat** — message your opponent via the chat panel on the right
+7. **Leave** — click 🚪 *Leave Game* to exit gracefully; your opponent is notified
 
-2. **Playing**
-   - Wait for an opponent to join
-   - X always goes first
-   - Click on an empty cell to place your mark
-   - Get 3 in a row (horizontal, vertical, or diagonal) to win
-
-3. **Chat**
-   - Use the chat box on the right to message your opponent
+---
 
 ## Communication Protocol
 
-The game uses Socket.io for real-time bidirectional communication:
+### Client → Server (Socket.io events)
 
-### Client → Server Events
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `join-game` | `{ playerName, roomId? }` | Join matchmaking queue or specific room |
+| `make-move` | `{ row, col, authToken }` | Submit a move (token validated server-side) |
+| `send-message` | `{ message }` | Publish chat message to room |
+| `reset-game` | `{ authToken }` | Request game reset |
+| `request-ai-bot` | `{ authToken }` | Add AI bot as second player |
+| `leave-game` | `{ authToken }` | Graceful exit with opponent notification |
+| `webrtc-offer` | `{ targetSocketId, offer, authToken }` | WebRTC signaling — offer |
+| `webrtc-answer` | `{ targetSocketId, answer, authToken }` | WebRTC signaling — answer |
+| `webrtc-ice-candidate` | `{ targetSocketId, candidate, authToken }` | WebRTC ICE exchange |
 
-- `join-game`: Join or create a game room
-- `make-move`: Submit a move (row, col)
-- `send-message`: Send chat message
-- `reset-game`: Request game reset
+### Server → Client (Socket.io events)
 
-### Server → Client Events
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `waiting` | `{ authToken, message }` | Player queued for matchmaking; token delivered |
+| `joined-game` | `{ roomId, symbol, board, players, authToken }` | Room assigned; token delivered/confirmed |
+| `game-started` | `{ currentPlayer, board, players }` | Both players present; board unlocked |
+| `move-made` | `{ row, col, symbol, board, currentPlayer }` | Move broadcast to room |
+| `game-ended` | `{ winner, winningLine?, isDraw? }` | Game over |
+| `game-reset` | `{ board, currentPlayer }` | Board cleared for new round |
+| `bot-joined` | `{ board, currentPlayer, players }` | AI bot added to game |
+| `chat-message` | `{ playerName, symbol, message, timestamp }` | Chat message published to room |
+| `opponent-left` | `{ message }` | Opponent disconnected or left gracefully |
+| `left-game` | `{ success }` | Confirms graceful leave for departing player |
+| `move-error` | `{ message }` | Invalid move or auth failure |
 
-- `joined-game`: Confirm successful room join
-- `player-joined`: Notify of new player
-- `game-started`: Game begins
-- `move-made`: Broadcast player move
-- `game-ended`: Game over (win/draw)
-- `chat-message`: Broadcast chat message
-- `game-reset`: New game started
+### REST API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/leaderboard` | Returns JSON leaderboard + active player count |
+| `GET` | `/health` | Server health check |
+
+---
+
+## Security
+
+- **Masquerading Mitigation** — SHA-256 `authToken` generated per session on join, validated on every `make-move`, `leave-game`, and WebRTC signaling event
+- **DoS Mitigation** — `express-rate-limit` limits `/api/` routes to 100 requests per 15-minute window
+- **Token Storage** — client stores token in `useRef` (not `useState`) to prevent stale closure vulnerabilities in async event handlers
+
+---
 
 ## Failure Handling
 
-The system handles various failure scenarios:
+| Failure Type | Handling |
+|---|---|
+| **Omission** | Socket.io auto-reconnects and replays events; at-most-once semantics |
+| **Crash (opponent)** | `opponent-left` event fires; modal shown; game ends gracefully |
+| **Network partition** | WebRTC falls back to Socket.io relay automatically |
+| **Invalid move** | Server validates all moves; `move-error` sent back to client |
+| **Token mismatch** | Server silently drops or rejects the event |
 
-- **Omission Failure**: Messages are resent automatically by Socket.io
-- **Crash Failure**: Server maintains game state; players can reconnect
-- **Network Delay**: Asynchronous design accommodates variable latency
-- **Validation**: Server validates all moves to prevent cheating
+---
+
+## Deployment
+
+### Server → Render
+
+```yaml
+# render.yaml is pre-configured
+Build Command:  cd server && npm install
+Start Command:  cd server && npm start
+Env Vars:       PORT, NODE_ENV, CLIENT_URL, SECRET_KEY
+```
+
+### Client → Vercel
+
+```
+Root Directory:   client
+Framework:        Next.js
+Env Vars:         NEXT_PUBLIC_SERVER_URL=<your Render URL>
+```
+
+### Quick Config
+
+```bash
+# Edit config.js with your deployed URLs, then run:
+node config.js
+# Automatically patches render.yaml, next.config.js, and .env files
+```
+
+---
 
 ## License
 
-MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+MIT

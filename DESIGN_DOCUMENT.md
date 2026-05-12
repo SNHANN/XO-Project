@@ -1,58 +1,65 @@
 # Distributed Systems Design Document
-## Online Multiplayer Tic-Tac-Toe Game
+## XO Arena — Online Multiplayer Tic-Tac-Toe
 
 ---
 
 ## 1. Architectural Pattern Selection
 
-### 1.1 Selected Pattern: Client-Server Architecture
+### 1.1 Selected Pattern: Hybrid Client-Server + P2P
 
-#### Justification
+The system uses a **two-tier hybrid architecture**:
 
-| Evaluation Criteria | Client-Server | Peer-to-Peer | Winner |
-|-------------------|---------------|--------------|--------|
-| **State Management** | Centralized (easy to sync) | Distributed (complex sync) | CS |
-| **Cheating Prevention** | Server validates all moves | Clients can modify logic | CS |
-| **Scalability** | Horizontal scaling possible | Limited by peer connections | CS |
-| **Latency for 2-Player** | Moderate (round-trip) | Low (direct connection) | Tie |
-| **Implementation Complexity** | Moderate | High (NAT traversal) | CS |
-| **Single Source of Truth** | Server owns state | Multiple copies | CS |
+- **Tier 1 — Clients**: Next.js browser applications
+- **Tier 2 — Server**: Node.js/Express with Socket.io, acting as both the authoritative game server and the WebRTC signaling tracker
 
-**Conclusion:** Client-Server is optimal for multiplayer games requiring central authority.
+Game **state and validation** live on the server (Client-Server).  
+Game **move delivery** can optionally flow directly between peers (P2P via WebRTC), mirroring the **Napster hybrid model** from Lecture 8.
+
+#### Pattern Justification
+
+| Evaluation Criteria | Pure Client-Server | Pure P2P | Hybrid (Selected) |
+|--------------------|--------------------|----------|-------------------|
+| **State Authority** | Centralized ✓ | Distributed ✗ | Server-authoritative ✓ |
+| **Move Latency** | Round-trip (moderate) | Direct (low) ✓ | Direct when P2P available ✓ |
+| **Cheating Prevention** | Server validates ✓ | Client-modifiable ✗ | Server always validates ✓ |
+| **NAT Traversal** | Not needed | Complex ✗ | Via STUN (handled) ✓ |
+| **Matchmaking** | Centralized ✓ | Not supported ✗ | Centralized tracker ✓ |
+| **Fault Tolerance** | Server SPOF | Resilient ✓ | Server fallback ✓ |
+
+**Conclusion:** Hybrid architecture captures the low latency of P2P for real-time moves while keeping the server as the single source of truth for game state, security, and matchmaking.
 
 ### 1.2 Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLIENT LAYER                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │  Player 1   │  │  Player 2   │  │  Player N   │              │
-│  │  Browser    │  │  Browser    │  │  Browser    │              │
-│  │  (Next.js)  │  │  (Next.js)  │  │  (Next.js)  │              │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
-│         │                │                │                      │
-│         └────────────────┼────────────────┘                      │
-│                          │ WebSocket (TCP)                      │
-└──────────────────────────┼──────────────────────────────────────┘
-                           │
-┌──────────────────────────┼──────────────────────────────────────┐
-│                         SERVER LAYER                             │
-│                          │                                        │
-│  ┌───────────────────────┴───────────────────────┐               │
-│  │           Socket.io Server                    │               │
-│  │  ┌─────────────┐    ┌─────────────────────┐   │               │
-│  │  │  Connection │◄──►│   GameManager       │   │               │
-│  │  │  Handler    │    │  (State Machine)    │   │               │
-│  │  └─────────────┘    └─────────────────────┘   │               │
-│  │                          │                    │               │
-│  │                    ┌─────┴─────┐              │               │
-│  │                    │ In-Memory │              │               │
-│  │                    │   Store   │              │               │
-│  │                    │ (Games Map)│              │               │
-│  │                    └───────────┘              │               │
-│  └───────────────────────────────────────────────┘               │
-└───────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                          XO ARENA SYSTEM                            │
+│                                                                     │
+│  ┌──────────────────┐  Socket.io/WS   ┌───────────────────────────┐ │
+│  │    CLIENT A      │◄───────────────►│                           │ │
+│  │  (Next.js/React) │                 │       GAME SERVER         │ │
+│  │                  │  WebRTC Signal  │    Node.js / Express      │ │
+│  │  ┌────────────┐  │◄───────────────►│                           │ │
+│  │  │  WebRTC    │  │                 │  ┌─────────────────────┐  │ │
+│  │  │  DataChan  │  │                 │  │  Socket.io Rooms    │  │ │
+│  │  └──────┬─────┘  │                 │  │  (Pub-Sub Groups)   │  │ │
+│  └─────────┼────────┘                 │  ├─────────────────────┤  │ │
+│            │ RTCDataChannel           │  │  GameManager        │  │ │
+│            │ (direct P2P moves)       │  │  (State Machine)    │  │ │
+│  ┌─────────┼────────┐                 │  ├─────────────────────┤  │ │
+│  │    CLIENT B      │  Socket.io/WS   │  │  AI Bot Engine      │  │ │
+│  │  (Next.js/React) │◄───────────────►│  ├─────────────────────┤  │ │
+│  │                  │                 │  │  Auth Token Store   │  │ │
+│  │  ┌────────────┐  │  WebRTC Signal  │  ├─────────────────────┤  │ │
+│  │  │  WebRTC    │  │◄───────────────►│  │  REST /api/         │  │ │
+│  │  │  DataChan  │  │                 │  │  (Leaderboard)      │  │ │
+│  │  └────────────┘  │                 │  └─────────────────────┘  │ │
+│  └──────────────────┘                 └───────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+**Move path options:**
+1. `Client → Server → Client` (Socket.io, always available, server-validated)
+2. `Client → Client` (WebRTC DataChannel, low-latency direct, optional)
 
 ---
 
@@ -64,120 +71,154 @@
 
 | Property | Value | Explanation |
 |----------|-------|-------------|
-| **Communication** | Event-driven (Message Passing) | No blocking calls |
-| **Timing** | Variable latency | Network-dependent |
-| **Clock** | No global clock | Logical timestamps only |
-| **State** | Eventually consistent | All clients receive updates |
+| **Communication** | Event-driven message passing | No blocking calls; all operations async |
+| **Timing** | Variable latency | Network-dependent; acceptable for turn-based play |
+| **Clock** | No global clock | Server timestamps used for chat; no move ordering dispute |
+| **State** | Server-authoritative | Server owns board state; clients receive diffs |
+| **Delivery** | At-most-once (Socket.io default) | TCP ensures no loss; at-most-once semantics |
 
 #### Interaction Patterns
 
+**Pattern A — Socket.io (Client-Server, always active)**
 ```
-┌──────────┐                    ┌──────────┐
-│ Client A │ ──1. make-move──►  │  Server  │
-│   (X)    │                    │          │
-└──────────┘                    │ Validate │
-                                  │  Update  │
-┌──────────┐                    │  State   │
-│ Client B │ ◄──2. move-made──  │          │
-│   (O)    │                    │  Check   │
-└──────────┘                    │  Win?    │
-           ◄──3. game-ended──   │          │
-                                  └──────────┘
+Client A (X)              Server              Client B (O)
+     │                       │                      │
+     │── join-game ─────────►│                      │
+     │◄─ waiting {token} ────│                      │
+     │                       │◄─ join-game ──────────│
+     │◄─ joined-game ────────│                      │
+     │                       │── joined-game ───────►│
+     │                       │── game-started ──────►│ (broadcast)
+     │◄─ game-started ───────│                      │
+     │── make-move {token} ─►│                      │
+     │                       │── move-made ─────────►│ (broadcast)
+     │◄─ move-made ──────────│                      │
+```
+
+**Pattern B — WebRTC DataChannel (P2P, after signaling)**
+```
+Client A (X)              Server              Client B (O)
+     │                       │                      │
+     │── webrtc-offer ──────►│── webrtc-offer ──────►│
+     │                       │◄─ webrtc-answer ──────│
+     │◄─ webrtc-answer ──────│                      │
+     │     [ICE exchange via server]                 │
+     │                                               │
+     │◄══════════ RTCDataChannel (direct) ══════════►│
+     │                  make-move                    │ (no server hop)
 ```
 
 **Key Characteristics:**
-- **Non-blocking:** Client does not wait for response
-- **Multicast:** Server broadcasts to all room members
-- **Ordered:** Socket.io guarantees message order per room
+- **Non-blocking:** Clients fire events and handle responses asynchronously
+- **Multicast:** `io.to(roomId).emit(...)` broadcasts to all room subscribers
+- **P2P Fallback:** If WebRTC DataChannel is not open, moves fall back to Socket.io automatically
+- **Server Validation:** Server validates all moves regardless of delivery path; P2P moves are optimistic updates
 
 ### 2.2 Failure Model
 
 #### Supported Failure Types
 
-| Failure Type | Detection | Handling Strategy | Implementation |
-|-------------|-----------|-------------------|----------------|
-| **Omission** (lost messages) | Timeout + Ack | Socket.io auto-retry | Built-in retry with exponential backoff |
-| **Crash** (client disconnect) | `disconnect` event | Notify opponent, end game | `socket.on('disconnect', ...)` |
-| **Network Delay** | High latency detection | Continue with stale state | Acceptable for turn-based game |
-| **Server Crash** | Connection loss | Client shows error, allows reconnect | Future: implement reconnection |
+| Failure Type | Detection Mechanism | Handling Strategy | Implementation |
+|-------------|---------------------|-------------------|----------------|
+| **Omission** | Socket.io internal ack | Auto-retry via TCP retransmission | Built into Socket.io/TCP stack |
+| **Crash (client)** | `socket.on('disconnect')` | Notify opponent via `opponent-left`; show modal | `disconnect` handler in `server.js` |
+| **Graceful leave** | `leave-game` event | Notify opponent; emit `left-game` confirmation | `leave-game` handler with token validation |
+| **Network partition** | WebRTC connection failure | Fall back to Socket.io relay | `dcRef.current?.readyState` check before P2P send |
+| **Invalid token** | Token mismatch on server | Drop event silently; emit `move-error` | `validTokens.get(socket.id)` check |
+| **Invalid move** | `GameManager.makeMove` | Emit `move-error` to sender | Bounds/turn/occupancy checks |
+| **Server crash** | Connection loss event | Client shows toast; Socket.io attempts reconnect | `connect_error` handler |
 
-#### Failure Scenarios & Responses
+#### Failure Scenario: Opponent Disconnect
 
 ```
-Scenario 1: Player disconnects mid-game
-┌─────────┐         ┌─────────┐         ┌─────────┐
-│ Player 1│◄────X───►│ Server  │◄───────►│ Player 2│
-│  (X)    │  disconnect │         │         │  (O)    │
-└─────────┘         └────┬────┘         └─────────┘
-                         │
-                    1. Detect disconnect
-                    2. Update game status = 'abandoned'
-                    3. Emit 'player-left' to Player 2
-                    4. Player 2 sees: "Opponent has left the game"
+Player 1 (X)              Server              Player 2 (O)
+     │                       │                      │
+     │                       │        X── disconnect │
+     │                       │◄─ [disconnect event] ─│
+     │                       │                      
+     │                  1. removePlayer(socketId)   
+     │                  2. clean up game state       
+     │                  3. delete authToken          
+     │◄─ opponent-left ──────│                      
+     │  {message: "..."}     │                      
+     │                       │                      
+  [Modal shown: Opponent Left]
+  [Click → resetToIdle()]
+```
 
-Scenario 2: Message loss (rare with TCP)
-┌─────────┐         ┌─────────┐
-│ Client  │──move?─►│ Server  │ (message lost)
-│         │         │         │
-│         │──move?─►│ Server  │ (retry)
-│         │◄─ack───│         │ (received)
-└─────────┘         └─────────┘
+#### Failure Scenario: Graceful Leave
+
+```
+Player 1 (X)              Server              Player 2 (O)
+     │── leave-game {token}─►│                      │
+     │                  1. validate token            
+     │                  2. notify opponent           
+     │                       │── opponent-left ─────►│
+     │◄─ left-game {success}─│                      │
+     │                       │                      │
+  [resetToIdle()]         [Modal: Opponent Left]
 ```
 
 ### 2.3 Security Model
 
 #### Threat Analysis
 
-| Threat | Likelihood | Impact | Mitigation |
-|--------|------------|--------|------------|
-| Move spoofing | High | High | Server validates all moves |
-| Room ID guessing | Medium | Low | 6-character random IDs |
-| Man-in-the-middle | Low | High | HTTPS/WSS encryption |
-| Replay attacks | Low | Medium | No action replay (stateful) |
-| DoS | Low | Medium | Rate limiting (future) |
+| Threat | Likelihood | Impact | Mitigation | Status |
+|--------|------------|--------|------------|--------|
+| **Masquerading** (move spoofing) | High | High | SHA-256 `authToken` per session, validated on every event | ✅ Implemented |
+| **Denial of Service** | Medium | Medium | `express-rate-limit` — 100 req / 15 min on `/api/` | ✅ Implemented |
+| **Room ID guessing** | Medium | Low | 6-character alphanumeric = 36⁶ ≈ 2.1 billion combinations | ✅ Implemented |
+| **Move injection via WebRTC** | Low | High | Server re-validates all moves; P2P is optimistic only | ✅ Implemented |
+| **Man-in-the-middle** | Low | High | HTTPS/WSS in production (TLS transport encryption) | Deployment-level |
+| **Replay attacks** | Low | Medium | Stateful server; token invalidated on disconnect | ✅ Implemented |
 
-#### Security Measures Implemented
+#### Auth Token Lifecycle
 
-```javascript
-// Server-side validation example (GameManager.js)
-makeMove(roomId, playerId, row, col) {
-  // 1. Verify game exists
-  if (!game) return { success: false, message: 'Game not found' };
-  
-  // 2. Verify player is in this game
-  if (!player) return { success: false, message: 'Player not found' };
-  
-  // 3. Verify it is player's turn
-  if (game.currentPlayer !== player.symbol) {
-    return { success: false, message: 'Not your turn' };
-  }
-  
-  // 4. Verify position is valid and empty
-  if (row < 0 || row > 2 || col < 0 || col > 2 || 
-      game.board[row][col] !== null) {
-    return { success: false, message: 'Invalid move' };
-  }
-  
-  // 5. Only then apply move
-  game.board[row][col] = player.symbol;
-}
 ```
+Client                              Server
+  │                                    │
+  │── join-game { playerName } ───────►│
+  │                                    │
+  │               const token =        │
+  │               crypto.createHash()  │
+  │                  .update(socketId + Date.now() + SECRET_KEY)
+  │                  .digest('hex')    │
+  │               validTokens.set(socketId, token)
+  │                                    │
+  │◄─ waiting { authToken: token } ───│  (matchmaking path)
+  │  OR                                │
+  │◄─ joined-game { authToken: token }│  (room path)
+  │                                    │
+  │  authRef.current = token           │  (stored in useRef — never stale)
+  │                                    │
+  │── make-move { row, col, authToken }►│
+  │                  if (validTokens.get(socketId) !== authToken)
+  │                    → drop / emit move-error
+  │◄─ move-made ──────────────────────│
+  │                                    │
+  │── [disconnect] ────────────────────│
+  │                  validTokens.delete(socketId)
+```
+
+**Why `useRef` for token storage (not `useState`)?**  
+Socket.io event listeners are registered once in a `useEffect`. If the token were in `useState`, the listeners would capture a stale closure value from registration time. `useRef` provides a mutable reference always pointing to the latest token value without needing to re-register all listeners on every re-render.
 
 #### Trust Zones
 
 ```
-┌─────────────────────────────────────────┐
-│           UNTRUSTED ZONE                │
-│  (Browser - Client can be modified)     │
-│  Never trust client-side validation     │
-└─────────────────────────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────┐
-│            TRUSTED ZONE                 │
-│  (Server - GameManager validation)      │
-│  Only server state is authoritative     │
-└─────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│  UNTRUSTED ZONE (Browser)                                  │
+│  Client can be modified; all inputs treated as untrusted   │
+│  Client state = optimistic UI only                         │
+└────────────────────────────────────────────────────────────┘
+                         │  authToken + event
+                         ▼
+┌────────────────────────────────────────────────────────────┐
+│  TRUSTED ZONE (Server)                                     │
+│  GameManager validates: move bounds, turn order, token     │
+│  Server state is the single source of truth                │
+│  Rate limiter guards public REST endpoints                 │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -188,76 +229,85 @@ makeMove(roomId, playerId, row, col) {
 
 | Mechanism | Pros | Cons | Decision |
 |-----------|------|------|----------|
-| **WebSocket** | Full-duplex, low latency, event-driven | Browser-only | Selected |
-| **HTTP Long Polling** | Wide compatibility | High latency, inefficient | Rejected |
-| **WebRTC P2P** | Direct connection, low latency | Complex NAT traversal, no central authority | Rejected |
-| **gRPC** | Type-safe, efficient | Overkill, browser support limited | Rejected |
-| **Server-Sent Events** | Simple one-way | No client-to-server push | Rejected |
+| **WebSocket (Socket.io)** | Full-duplex, low latency, rooms, fallback | Browser-only runtime | ✅ Primary IPC |
+| **WebRTC DataChannel** | Direct P2P, lowest latency, no server hop | Requires signaling, NAT traversal | ✅ Optional P2P moves |
+| **REST (HTTP GET)** | Stateless, cacheable, universally supported | Polling only, not push | ✅ Leaderboard API |
+| **HTTP Long Polling** | Wide compatibility | High latency, server load | ❌ Rejected |
+| **gRPC** | Type-safe, binary efficient | Browser support limited, overkill | ❌ Rejected |
+| **Server-Sent Events** | Simple server push | Unidirectional only | ❌ Rejected |
 
-### 3.2 Socket.io Design Decisions
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    SOCKET.IO STACK                       │
-┌─────────────────────────────────────────────────────────┐
-│  Socket.io (Application Layer)                          │
-│  - Event namespacing                                    │
-│  - Room management                                      │
-│  - Fallback to polling if WebSocket fails               │
-├─────────────────────────────────────────────────────────┤
-│  Engine.io (Transport Layer)                            │
-│  - WebSocket preferred                                  │
-│  - HTTP long-polling fallback                           │
-├─────────────────────────────────────────────────────────┤
-│  TCP (Network Layer)                                    │
-│  - Reliable, ordered delivery                           │
-│  - Connection-oriented                                  │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 3.3 Room-Based Communication
+### 3.2 Socket.io Protocol Stack
 
 ```
-Room: "ABC123"
-┌──────────┐     ┌──────────┐
-│ Player 1 │◄───►│ Player 2 │
-│ (Socket) │     │ (Socket) │
-└────┬─────┘     └────┬─────┘
-     │                │
-     └────┬───────────┘
-          │
-    ┌─────┴─────┐
-    │  Server   │
-    │ io.to()   │
-    │ .emit()   │
-    └───────────┘
-
-Benefits:
-- Isolation: Players in different rooms do not see each other
-- Multicast: Efficient broadcast to room members
-- Scalability: Rooms can be distributed across servers
+┌──────────────────────────────────────────────────────────────┐
+│  Application Layer — Socket.io Events                        │
+│  JSON-serialized payloads  │  Named events  │  Room multicast │
+├──────────────────────────────────────────────────────────────┤
+│  Transport Layer — Engine.io                                 │
+│  WebSocket preferred  │  HTTP long-polling fallback          │
+├──────────────────────────────────────────────────────────────┤
+│  Network Layer — TCP                                         │
+│  Reliable, ordered, connection-oriented delivery             │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+### 3.3 Room-Based Pub-Sub (Group Communication)
+
+Socket.io Rooms implement the **publish-subscribe** pattern. Each game room is a named group; the server acts as the broker.
+
+```
+Room: "ABC123" (Lecture 6 — Group Communication)
+
+ Publisher          Broker (Server)          Subscribers
+┌──────────┐       ┌──────────────┐       ┌──────────┐
+│ Player 1 │──────►│ io.to(room)  │──────►│ Player 1 │
+│  emits   │       │   .emit()    │       └──────────┘
+│  move    │       │              │──────►┌──────────┐
+└──────────┘       └──────────────┘       │ Player 2 │
+                                          └──────────┘
+
+Properties:
+  Isolation   — players in Room A cannot receive Room B events
+  Multicast   — single emit fans out to all room members
+  Ephemeral   — rooms destroyed when all members disconnect
+  Asymmetric  — any member can publish; all members subscribe
+```
+
+**Subscribed events per room:** `move-made`, `game-started`, `game-ended`, `game-reset`, `chat-message`, `opponent-left`, `bot-joined`
 
 ### 3.4 Message Format
 
+**Standard Socket.io event payload:**
 ```javascript
-// Event Structure (Socket.io)
-{
-  event: "make-move",           // Event name
-  data: { row: 1, col: 2 },     // Payload
-  room: "ABC123",               // Room ID (implicit via socket.join)
-  timestamp: 1699123456789      // Client-side timestamp (optional)
-}
-
-// Server Response Pattern
-socket.emit('move-made', {
+// Client → Server: Authenticated move request
+socket.emit('make-move', {
   row: 1,
   col: 2,
-  symbol: 'X',
-  board: [...],
-  currentPlayer: 'O',
-  serverTimestamp: Date.now()  // Server validation
+  authToken: 'a3f8c...'   // SHA-256 session token (Lecture 9)
 });
+
+// Server → Room: Broadcast move result
+io.to(roomId).emit('move-made', {
+  row: 1, col: 2,
+  symbol: 'X',
+  board: [['X',null,null],[null,'O',null],[null,null,null]],
+  currentPlayer: 'O'
+});
+
+// Server → Client: Token delivery on join
+socket.emit('waiting', {
+  message: 'Waiting for opponent...',
+  authToken: 'a3f8c...'
+});
+```
+
+**WebRTC DataChannel payload (P2P move):**
+```javascript
+// Client A → Client B directly (no server hop)
+dataChannel.send(JSON.stringify({
+  board: [['X',null,null],[null,'O',null],[null,null,null]],
+  currentPlayer: 'O'
+}));
 ```
 
 ---
@@ -266,101 +316,182 @@ socket.emit('move-made', {
 
 ### 4.1 Why Message Passing over RPC?
 
-| Characteristic | RPC (Remote Procedure Call) | Message Passing | Our Choice |
-|----------------|----------------------------|-----------------|------------|
+| Characteristic | RPC | Message Passing | Our Choice |
+|----------------|-----|-----------------|------------|
 | **Coupling** | Tight (function signatures) | Loose (event names) | Loose |
-| **Flexibility** | Low (fixed interfaces) | High (dynamic events) | High |
-| **Real-time** | Request-response only | Push notifications | Push |
-| **Game Events** | Sync calls | Async events | Async |
-| **Complexity** | IDL definitions needed | Simple event names | Simple |
+| **Push capability** | Request-response only | Server-initiated push | Push |
+| **Async-native** | Needs callbacks/futures | Natively event-driven | Event-driven |
+| **Multi-recipient** | One-to-one | One-to-many (rooms) | Multicast |
+| **Schema rigidity** | IDL/proto required | JSON duck typing | Flexible |
 
-### 4.2 Remote Invocation Pattern
+### 4.2 Full Event Protocol
 
+#### Client → Server
+
+| Event | Payload | Response Event | Auth Required | Description |
+|-------|---------|----------------|---------------|-------------|
+| `join-game` | `{ playerName, roomId? }` | `waiting` or `joined-game` or `join-error` | No | Enter matchmaking or specific room |
+| `make-move` | `{ row, col, authToken }` | `move-made` (broadcast) or `move-error` | **Yes** | Place mark on board |
+| `send-message` | `{ message }` | `chat-message` (broadcast) | No | Pub-sub chat to room |
+| `reset-game` | `{ authToken }` | `game-reset` (broadcast) | **Yes** | Clear board, restart |
+| `request-ai-bot` | `{ authToken }` | `bot-joined` (broadcast) | **Yes** | Add AI as second player |
+| `leave-game` | `{ authToken }` | `left-game` (unicast) + `opponent-left` (opponent) | **Yes** | Graceful exit |
+| `webrtc-offer` | `{ targetSocketId, offer, authToken }` | relayed `webrtc-offer` | **Yes** | P2P signaling relay |
+| `webrtc-answer` | `{ targetSocketId, answer, authToken }` | relayed `webrtc-answer` | **Yes** | P2P signaling relay |
+| `webrtc-ice-candidate` | `{ targetSocketId, candidate, authToken }` | relayed `webrtc-ice-candidate` | **Yes** | ICE exchange relay |
+
+#### Server → Client
+
+| Event | Payload | Delivery | Trigger |
+|-------|---------|----------|---------|
+| `waiting` | `{ authToken, message }` | Unicast | Player queued for matchmaking |
+| `joined-game` | `{ roomId, symbol, board, players, status, authToken }` | Unicast | Room assigned to player |
+| `game-started` | `{ currentPlayer, board, players }` | Multicast | Second player joined room |
+| `move-made` | `{ row, col, symbol, board, currentPlayer }` | Multicast | Valid move played |
+| `game-ended` | `{ winner, winningLine?, isDraw? }` | Multicast | Win or draw detected |
+| `game-reset` | `{ board, currentPlayer }` | Multicast | Game restarted |
+| `bot-joined` | `{ board, currentPlayer, players }` | Multicast | AI bot added to room |
+| `chat-message` | `{ playerName, symbol, message, timestamp }` | Multicast | Player sent a message |
+| `opponent-left` | `{ message }` | Unicast (remaining player) | Opponent disconnected or left |
+| `left-game` | `{ success }` | Unicast (leaving player) | Graceful leave confirmed |
+| `move-error` | `{ message }` | Unicast | Invalid move or bad token |
+| `join-error` | `{ message }` | Unicast | Room full or invalid roomId |
+
+#### REST API (Lecture 7 — Web Services)
+
+| Method | Endpoint | Response Format | Description |
+|--------|----------|-----------------|-------------|
+| `GET` | `/api/leaderboard` | `application/json` | Ranked player stats + active count |
+| `GET` | `/health` | `application/json` | Server uptime check |
+
+**Leaderboard response shape:**
+```json
+{
+  "leaderboard": [
+    { "rank": 1, "playerName": "Alice", "wins": 12, "losses": 3, "winRate": "80%" }
+  ],
+  "totalGames": 47,
+  "activePlayers": 4,
+  "timestamp": "2026-05-05T20:00:00.000Z"
+}
 ```
-Pattern: Event-Driven Message Passing
-Style: Fire-and-Forget + Acknowledgment
 
-Client A                          Server
-   │                                │
-   │──1. Emit: join-game──────────►│
-   │                                │
-   │◄──2. Ack: joined-game─────────│
-   │                                │
-   │──3. Emit: make-move──────────►│
-   │                                │
-   │◄──4. Broadcast: move-made───────│ (to all in room)
-   │                                │
-   │◄──5. Broadcast: game-ended──────│ (if game over)
-   │                                │
-```
+### 4.3 Reliability Guarantees
 
-### 4.3 Event Protocol Specification
-
-#### Client to Server (Invocations)
-
-| Event | Payload | Response | Description |
-|-------|---------|----------|-------------|
-| `join-game` | `{ playerName, roomId? }` | `joined-game` or `join-error` | Join or create game |
-| `make-move` | `{ row, col }` | `move-made` or `move-error` | Make a move |
-| `send-message` | `{ message }` | `chat-message` (broadcast) | Send chat |
-| `reset-game` | - | `game-reset` (broadcast) | Restart game |
-
-#### Server to Client (Callbacks/Broadcasts)
-
-| Event | Payload | Trigger | Delivery |
-|-------|---------|---------|----------|
-| `joined-game` | Game state | Player joins successfully | Unicast |
-| `game-started` | Initial state | Second player joins | Multicast |
-| `move-made` | Move + new state | Valid move played | Multicast |
-| `game-ended` | Winner/Draw info | Game completed | Multicast |
-| `chat-message` | Message data | Player sends message | Multicast |
-| `player-left` | Disconnect info | Player disconnects | Multicast to room |
-
-### 4.4 Reliability Guarantees
-
-| Guarantee | Implementation | Notes |
-|-----------|----------------|-------|
-| **At-Most-Once** | Socket.io default | No duplicate delivery |
-| **Ordered Delivery** | TCP guarantees | Events arrive in order |
-| **No Persistence** | Memory-only | Lost on server restart |
-| **No QoS** | Best-effort | No priority levels |
+| Guarantee | Mechanism | Notes |
+|-----------|-----------|-------|
+| **Ordered delivery** | TCP guarantees in-order segments | Socket.io events arrive in emission order |
+| **At-most-once** | Socket.io default semantics | No duplicate delivery |
+| **No persistence** | In-memory `Map` on server | State lost on server restart |
+| **P2P optimistic** | Client updates board immediately on P2P send | Server remains authoritative; mismatch resolved on next Socket.io event |
 
 ---
 
-## 5. Design Summary
+## 5. Web Services & Group Communication Design
 
-### 5.1 Key Design Decisions
+### 5.1 RESTful Leaderboard API (Lecture 7)
+
+The leaderboard is exposed as a **traditional REST Web Service** over HTTP, demonstrating the contrast between stateless request-response (REST) and stateful persistent connection (WebSocket) paradigms.
+
+```
+Client (Leaderboard.tsx)          Server (/api/leaderboard)
+        │                                   │
+        │── GET /api/leaderboard ──────────►│
+        │                            Rate limiter check
+        │                            Build leaderboard from games Map
+        │◄── 200 OK { leaderboard: [...] } ─│
+        │                                   │
+        │  [Auto-repeat every 30 seconds]
+```
+
+**Design choices:**
+- Stateless HTTP GET — no session cookie needed
+- Rate-limited to 100 requests / 15 min via `express-rate-limit`
+- Returns computed stats (wins, losses, win rate) from the live in-memory game store
+- Client polls every 30 s rather than pushing (WebSocket push would be overengineering for a leaderboard)
+
+### 5.2 Group Communication — Socket.io Rooms (Lecture 6)
+
+| Property | Value |
+|----------|-------|
+| **Model** | Publish-Subscribe with named groups (rooms) |
+| **Membership** | Explicit: `socket.join(roomId)` / `socket.leave(roomId)` |
+| **Delivery** | `io.to(roomId).emit(event, data)` — all subscribers receive |
+| **Ordering** | FIFO per connection (TCP) |
+| **Persistence** | None — ephemeral for session lifetime |
+| **Failure** | Member crash removes them; remaining subscribers unaffected |
+
+Chat messages use the same room pub-sub channel as game events, demonstrating that a single group-communication primitive serves multiple application concerns.
+
+---
+
+## 6. AI Bot Design (Lecture 8 — Autonomous Agent)
+
+The AI bot acts as a virtual second player, enabling single-player games without human matchmaking.
+
+### Bot Architecture
+
+```
+Server (botRooms Map)
+  │
+  ├── botRooms.set(roomId, true)   ← when request-ai-bot received
+  │
+  └── After every valid move-made in a bot room:
+          scheduleBotMove(roomId, 600ms delay)
+                │
+                └── getBotMove(board)
+                        │
+                        ├── 1. Winning move available? → take it
+                        ├── 2. Block opponent win?    → block it
+                        ├── 3. Center free?           → take center
+                        ├── 4. Corner available?      → take corner
+                        └── 5. Fallback: random empty cell
+```
+
+**Strategic priority:** win > block > center > corner > random  
+**Delay:** 600 ms simulated think time for natural UX
+
+---
+
+## 7. Design Summary
+
+### 7.1 Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Client-Server over P2P | Central authority needed for game validation |
-| WebSocket over HTTP | Real-time bidirectional communication required |
-| Message Passing over RPC | Better fit for event-driven game updates |
-| In-Memory over Database | Speed priority, acceptable data loss on crash |
-| Room-based multicast | Efficient multi-player synchronization |
+| Hybrid CS + P2P over pure CS | P2P DataChannel cuts move latency; server retains authority |
+| Socket.io over raw WebSocket | Built-in rooms, fallback, reconnection, event namespacing |
+| `useRef` for auth token | Prevents stale closure in async socket callbacks |
+| In-memory state over database | Speed priority; acceptable for session-scoped game state |
+| SHA-256 tokens over sessions | Lightweight, stateless verification; no cookie needed |
+| Strategic AI over Minimax | O(1) response for 3×3 is sufficient; Minimax overkill |
+| REST for leaderboard over WS | Stateless polling fits the use case; avoids unnecessary subscription |
 
-### 5.2 Trade-offs
+### 7.2 Trade-offs
 
 | Trade-off | Our Choice | Alternative | Impact |
 |-----------|-----------|-------------|--------|
-| Speed vs Persistence | Speed (in-memory) | Database | Fast gameplay, lose data on crash |
-| Consistency vs Availability | Availability | Strict consistency | Players can continue with slight delay |
-| Complexity vs Features | Moderate complexity | Rich features | Core features work reliably |
+| P2P latency vs server authority | Both (hybrid) | One or the other | Best of both; server wins disputes |
+| Speed vs persistence | Speed (in-memory) | Database | Fast gameplay; data lost on crash |
+| Availability vs consistency | Availability | Strict consistency | Players continue with slight delay |
+| Client UX vs complexity | Optimistic P2P updates | All-synchronous | Snappier feel; minor resync risk |
+| Simplicity vs features | Moderate complexity | Feature-sparse | Core features all working reliably |
 
 ---
 
-## 6. Future Enhancements
+## 8. Future Enhancements
 
 | Enhancement | Design Impact |
 |-------------|-------------|
-| Database persistence | Add data tier, update failure model |
-| Authentication | Add auth layer, update security model |
-| Reconnection | Add session recovery, update failure model |
-| Spectator mode | Add observer pattern to interaction model |
-| AI opponents | Add bot player to architecture |
+| **Database persistence** | Add data tier; leaderboard survives restarts |
+| **Session reconnection** | Store game state keyed by player name; re-join on socket reconnect |
+| **Spectator mode** | Add observer role to rooms; emit read-only `game-update` events |
+| **Multi-room scaling** | Redis adapter for Socket.io; horizontal server scaling |
+| **WebRTC TURN server** | Handle symmetric NAT for corporate/mobile networks |
+| **Minimax AI** | Replace strategic heuristic with full minimax for harder difficulty |
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** 2026-04-14  
+**Document Version:** 2.0  
+**Last Updated:** 2026-05-05  
 **Author:** System Designer
