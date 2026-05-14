@@ -42,7 +42,7 @@ const io = socketIo(server, {
 // ─────────────────────────────────────────────────────────────────────────────
 const gameManager = new GameManager();
 const validTokens = new Map(); // socketId → authToken  (Lecture 9: Masquerading mitigation)
-const botRooms    = new Map(); // roomId   → playerSocketId
+const botRooms    = new Map(); // roomId   → { playerId, difficulty }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECURITY [Lecture 9]: Token helpers
@@ -73,42 +73,38 @@ function checkWin(board, symbol) {
   return false;
 }
 
-function getBotMove(board) {
-  const b = board.map(r => [...r]); // shallow copy to avoid mutating real board
-
-  // 1. Win if possible
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      if (b[r][c] === null) {
-        b[r][c] = 'O';
-        if (checkWin(b, 'O')) { b[r][c] = null; return { row: r, col: c }; }
-        b[r][c] = null;
-      }
-    }
-  }
-  // 2. Block opponent
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      if (b[r][c] === null) {
-        b[r][c] = 'X';
-        if (checkWin(b, 'X')) { b[r][c] = null; return { row: r, col: c }; }
-        b[r][c] = null;
-      }
-    }
-  }
-  // 3. Center
-  if (b[1][1] === null) return { row: 1, col: 1 };
-  // 4. Random corner
-  const corners = [[0,0],[0,2],[2,0],[2,2]].filter(([r,c]) => b[r][c] === null);
-  if (corners.length) {
-    const [r, c] = corners[Math.floor(Math.random() * corners.length)];
-    return { row: r, col: c };
-  }
-  // 5. Any empty cell
+function getBotMove(board, difficulty = 'hard') {
+  const empty = [];
   for (let r = 0; r < 3; r++)
     for (let c = 0; c < 3; c++)
-      if (b[r][c] === null) return { row: r, col: c };
-  return null;
+      if (board[r][c] === null) empty.push({ row: r, col: c });
+  if (!empty.length) return null;
+
+  // Beginner: fully random moves
+  if (difficulty === 'beginner') {
+    return empty[Math.floor(Math.random() * empty.length)];
+  }
+
+  const b = board.map(r => [...r]);
+  // Win if possible
+  for (const { row: r, col: c } of empty) {
+    b[r][c] = 'O'; if (checkWin(b, 'O')) { b[r][c] = null; return { row: r, col: c }; } b[r][c] = null;
+  }
+  // Block opponent's win
+  for (const { row: r, col: c } of empty) {
+    b[r][c] = 'X'; if (checkWin(b, 'X')) { b[r][c] = null; return { row: r, col: c }; } b[r][c] = null;
+  }
+
+  // Easy: random after win/block checks
+  if (difficulty === 'easy') {
+    return empty[Math.floor(Math.random() * empty.length)];
+  }
+
+  // Hard: center → corner → any empty
+  if (b[1][1] === null) return { row: 1, col: 1 };
+  const corners = [[0,0],[0,2],[2,0],[2,2]].filter(([r,c]) => b[r][c] === null);
+  if (corners.length) { const [r,c] = corners[Math.floor(Math.random() * corners.length)]; return { row: r, col: c }; }
+  return empty[Math.floor(Math.random() * empty.length)];
 }
 
 // Schedule a bot move after a short "thinking" delay
@@ -127,7 +123,7 @@ function scheduleBotMove(roomId) {
     if (!g || g.status !== 'playing') return;
     if (g.currentPlayer !== botPlayer.symbol) return;
 
-    const move = getBotMove(g.board);
+    const move = getBotMove(g.board, botRooms.get(roomId)?.difficulty || 'hard');
     if (!move) return;
 
     const result = gameManager.makeMove(roomId, botId, move.row, move.col);
@@ -316,22 +312,49 @@ io.on('connection', (socket) => {
   });
 
   // ── REQUEST AI BOT ────────────────────────────────────────────────────────
-  socket.on('request-ai-bot', ({ authToken }) => {
-    if (!socket.roomId) return;
+  socket.on('request-ai-bot', ({ authToken, difficulty = 'hard' }) => {
     if (!validateToken(socket.id, authToken)) {
       socket.emit('move-error', { message: 'Unauthorized: invalid session token' });
       return;
     }
 
-    const botId = `bot-${socket.roomId}`;
-    const result = gameManager.addPlayer(botId, '🤖 AI Bot', socket.roomId);
+    let playerRoomId = socket.roomId;
+
+    // If player has no room yet (matchmaking queue), create one for them
+    if (!playerRoomId) {
+      const waiting = gameManager.waitingPlayers.find(p => p.socketId === socket.id);
+      const playerName = waiting ? waiting.playerName : 'Player';
+      gameManager.waitingPlayers = gameManager.waitingPlayers.filter(p => p.socketId !== socket.id);
+      const newRoomId = gameManager.generateRoomId();
+      const joinResult = gameManager.joinOrCreateRoom(socket.id, playerName, newRoomId);
+      if (!joinResult.success) {
+        socket.emit('move-error', { message: 'Failed to create room for AI game.' });
+        return;
+      }
+      playerRoomId = newRoomId;
+      socket.join(playerRoomId);
+      socket.roomId = playerRoomId;
+      socket.playerSymbol = joinResult.symbol;
+      socket.emit('joined-game', {
+        roomId: playerRoomId,
+        symbol: joinResult.symbol,
+        board: joinResult.gameState.board,
+        currentPlayer: joinResult.gameState.currentPlayer,
+        players: joinResult.gameState.players,
+        status: joinResult.gameState.status,
+        authToken: validTokens.get(socket.id),
+      });
+    }
+
+    const botId = `bot-${playerRoomId}`;
+    const result = gameManager.addPlayer(botId, '🤖 AI Bot', playerRoomId);
     if (!result.success) {
       socket.emit('move-error', { message: result.message });
       return;
     }
 
     // Register this room as a bot room for continued AI responses
-    botRooms.set(socket.roomId, socket.id);
+    botRooms.set(playerRoomId, { playerId: socket.id, difficulty });
 
     socket.emit('bot-joined', {
       roomId: result.roomId,
@@ -341,14 +364,14 @@ io.on('connection', (socket) => {
       status: result.gameState.status,
     });
 
-    io.to(socket.roomId).emit('game-started', {
+    io.to(playerRoomId).emit('game-started', {
       currentPlayer: result.gameState.currentPlayer,
       board: result.gameState.board,
       players: result.gameState.players,
     });
 
     // If bot goes first, schedule its opening move
-    scheduleBotMove(socket.roomId);
+    scheduleBotMove(playerRoomId);
   });
 
   // ── LEAVE GAME ────────────────────────────────────────────────────────────

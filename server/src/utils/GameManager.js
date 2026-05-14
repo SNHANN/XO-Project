@@ -142,9 +142,9 @@ class GameManager {
     game.moves.push({ row, col, symbol: player.symbol, playerId });
 
     // Check for winner
-    const winResult = this.checkWinner(game.board, row, col, player.symbol);
+    const winResult = this.checkWinner(game.board);
     if (winResult.winner) {
-      game.winner = player.symbol;
+      game.winner = winResult.symbol;
       game.winningLine = winResult.line;
       game.status = 'ended';
     } else if (this.isBoardFull(game.board)) {
@@ -161,27 +161,19 @@ class GameManager {
     };
   }
 
-  checkWinner(board, row, col, symbol) {
-    // Check row
-    if (board[row].every(cell => cell === symbol)) {
-      return { winner: true, line: [[row, 0], [row, 1], [row, 2]] };
+  checkWinner(board) {
+    const lines = [
+      [[0,0],[0,1],[0,2]], [[1,0],[1,1],[1,2]], [[2,0],[2,1],[2,2]],
+      [[0,0],[1,0],[2,0]], [[0,1],[1,1],[2,1]], [[0,2],[1,2],[2,2]],
+      [[0,0],[1,1],[2,2]], [[0,2],[1,1],[2,0]],
+    ];
+    for (const line of lines) {
+      const [[r0,c0],[r1,c1],[r2,c2]] = line;
+      const sym = board[r0][c0];
+      if (sym && sym === board[r1][c1] && sym === board[r2][c2]) {
+        return { winner: true, symbol: sym, line };
+      }
     }
-
-    // Check column
-    if (board.every(r => r[col] === symbol)) {
-      return { winner: true, line: [[0, col], [1, col], [2, col]] };
-    }
-
-    // Check main diagonal
-    if (row === col && board.every((r, i) => r[i] === symbol)) {
-      return { winner: true, line: [[0, 0], [1, 1], [2, 2]] };
-    }
-
-    // Check anti-diagonal
-    if (row + col === 2 && board.every((r, i) => r[2 - i] === symbol)) {
-      return { winner: true, line: [[0, 2], [1, 1], [2, 0]] };
-    }
-
     return { winner: false };
   }
 

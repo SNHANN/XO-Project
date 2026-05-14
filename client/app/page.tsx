@@ -53,6 +53,7 @@ export default function Home() {
   const [isConnected, setConn]    = useState(false);
   const [toast, setToast]         = useState<{ msg: string; ok?: boolean } | null>(null);
   const [modal, setModal]         = useState<{ title: string; body: string } | null>(null);
+  const [resultModal, setResultModal] = useState<'X' | 'O' | 'draw' | null>(null);
 
   // SECURITY [Lecture 9]: Store token in useRef to avoid stale closures
   // in event-handler callbacks. Keeps the value always fresh without
@@ -76,6 +77,7 @@ export default function Home() {
     authRef.current = null;
     setGs(INIT);
     setModal(null);
+    setResultModal(null);
     setP2P('off');
     setUseP2P(false);
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
@@ -152,6 +154,7 @@ export default function Home() {
         winningLine: data.winningLine || null,
         isDraw: !!data.isDraw,
       }));
+      setResultModal(data.isDraw ? 'draw' : (data.winner ?? null));
     });
 
     // ── game-reset ────────────────────────────────────────────────────────
@@ -163,6 +166,7 @@ export default function Home() {
         status: 'playing',
         winner: null, winningLine: null, isDraw: false,
       }));
+      setResultModal(null);
     });
 
     // ── bot joined ────────────────────────────────────────────────────────
@@ -280,8 +284,8 @@ export default function Home() {
     navigator.clipboard.writeText(gs.roomId).then(() => showToast('Room ID copied!', true));
   }, [gs.roomId, showToast]);
 
-  const handleRequestAI = useCallback(() => {
-    if (socket && authRef.current) socket.emit('request-ai-bot', { authToken: authRef.current });
+  const handleRequestAI = useCallback((difficulty: string) => {
+    if (socket && authRef.current) socket.emit('request-ai-bot', { authToken: authRef.current, difficulty });
   }, [socket]);
 
   const handleSendMessage = useCallback((message: string) => {
@@ -388,6 +392,47 @@ export default function Home() {
             <button onClick={resetToIdle} className="btn-primary w-full text-white font-bold py-3 rounded-xl">
               Return to Home
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Game Result Modal ───────────────────────────────────────────── */}
+      {resultModal !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm fade-in">
+          <div className="glass rounded-3xl p-8 max-w-sm w-full text-center scale-in">
+            {resultModal === 'draw' ? (
+              <>
+                <div className="text-6xl mb-4">🤝</div>
+                <h2 className="text-2xl font-bold text-slate-100 mb-2">It&apos;s a Draw!</h2>
+                <p className="text-slate-400 text-sm mb-6">A perfectly balanced game — well played!</p>
+              </>
+            ) : resultModal === gs.playerSymbol ? (
+              <>
+                <div className="text-6xl mb-4">🎉</div>
+                <h2 className="text-2xl font-bold text-green-400 mb-2">You Win!</h2>
+                <p className="text-slate-400 text-sm mb-6">Outstanding! You dominated the board.</p>
+              </>
+            ) : (
+              <>
+                <div className="text-6xl mb-4">😢</div>
+                <h2 className="text-2xl font-bold text-rose-400 mb-2">You Lose</h2>
+                <p className="text-slate-400 text-sm mb-6">Better luck next time. Keep practicing!</p>
+              </>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setResultModal(null); handleReset(); }}
+                className="btn-primary flex-1 text-white font-bold py-3 rounded-xl"
+              >
+                🔄 Play Again
+              </button>
+              <button
+                onClick={() => { setResultModal(null); handleLeave(); }}
+                className="btn-danger flex-1 text-white font-bold py-3 rounded-xl"
+              >
+                🚪 Leave
+              </button>
+            </div>
           </div>
         </div>
       )}

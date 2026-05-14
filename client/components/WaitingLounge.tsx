@@ -1,32 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import { Copy, Bot, Check, Wifi } from 'lucide-react';
+import { Bot, Wifi } from 'lucide-react';
 
 interface WaitingLoungeProps {
   roomId: string | null;
   playerName: string;
-  onRequestAI: () => void;
+  onRequestAI: (difficulty: string) => void;
   onCopyRoomId: () => void;
   onLeave: () => void;
-  isMatchmaking: boolean; // true = no roomId, queued for random match
+  isMatchmaking: boolean;
 }
 
+const DIFFICULTIES = [
+  { key: 'beginner', label: 'Beginner', desc: 'Random moves' },
+  { key: 'easy',     label: 'Easy',     desc: 'Blocks wins' },
+  { key: 'hard',     label: 'Hard',     desc: 'Full strategy' },
+] as const;
+
 export default function WaitingLounge({
-  roomId,
   playerName,
   onRequestAI,
-  onCopyRoomId,
   onLeave,
-  isMatchmaking,
 }: WaitingLoungeProps) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    onCopyRoomId();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const [difficulty, setDifficulty] = useState<'beginner' | 'easy' | 'hard'>('hard');
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-[#07071a]/80 backdrop-blur-sm fade-in">
@@ -42,48 +39,47 @@ export default function WaitingLounge({
           </div>
         </div>
 
-        <h2 className="text-2xl font-bold text-slate-100 mb-1">
-          {isMatchmaking ? 'Finding an Opponent…' : 'Waiting for Opponent…'}
-        </h2>
+        <h2 className="text-2xl font-bold text-slate-100 mb-1">Finding an Opponent…</h2>
         <p className="text-slate-400 text-sm mb-6">
-          {isMatchmaking
-            ? "You'll be matched automatically when someone else joins."
-            : `Share the room code below with a friend, ${playerName}.`}
+          You&apos;ll be matched automatically when someone else joins, {playerName}.
         </p>
 
-        {/* Room ID card (only for private-room path) */}
-        {roomId && !isMatchmaking && (
-          <div className="glass rounded-2xl p-4 mb-6">
-            <p className="text-xs text-slate-500 uppercase tracking-widest mb-2">Room Code</p>
-            <div className="flex items-center justify-center gap-3">
-              <span className="font-mono text-3xl font-bold tracking-widest text-violet-300">
-                {roomId}
-              </span>
-              <button
-                onClick={handleCopy}
-                className="p-2 glass rounded-lg hover:bg-white/10 transition-colors"
-                title="Copy Room ID"
-              >
-                {copied
-                  ? <Check className="w-4 h-4 text-green-400" />
-                  : <Copy className="w-4 h-4 text-slate-400" />}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* AI Bot section */}
+        <div className="glass rounded-2xl p-4 mb-4">
+          <p className="text-xs text-slate-400 uppercase tracking-widest font-semibold mb-3">
+            Or play against the AI
+          </p>
 
-        {/* AI Bot button (only when in a private room) */}
-        {roomId && !isMatchmaking && (
+          {/* Difficulty selector */}
+          <div className="flex gap-2 mb-4">
+            {DIFFICULTIES.map(({ key, label, desc }) => (
+              <button
+                key={key}
+                onClick={() => setDifficulty(key)}
+                className={`flex-1 py-2 px-1 rounded-xl text-xs font-semibold transition-all ${
+                  difficulty === key
+                    ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40'
+                    : 'glass text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <div>{label}</div>
+                <div className={`text-[10px] mt-0.5 font-normal ${
+                  difficulty === key ? 'text-violet-200' : 'text-slate-600'
+                }`}>{desc}</div>
+              </button>
+            ))}
+          </div>
+
           <button
-            onClick={onRequestAI}
-            className="w-full mb-3 bg-gradient-to-r from-pink-600 to-violet-600 text-white font-bold py-3 px-6 rounded-xl
+            onClick={() => onRequestAI(difficulty)}
+            className="w-full bg-gradient-to-r from-pink-600 to-violet-600 text-white font-bold py-3 px-6 rounded-xl
                        hover:from-pink-500 hover:to-violet-500 transition-all transform hover:scale-[1.02]
                        shadow-lg shadow-violet-900/40 flex items-center justify-center gap-2"
           >
             <Bot className="w-5 h-5" />
             Play Against AI Bot
           </button>
-        )}
+        </div>
 
         {/* Leave / Cancel */}
         <button
